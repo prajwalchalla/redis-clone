@@ -7,4 +7,5 @@ cmake_minimum_required(VERSION 3.0)
 project (redis)
 
 # Add an executable
-add_executable(redis main.c)
+add_executable(server server.cpp)
+add_executable(client client.cpp)
