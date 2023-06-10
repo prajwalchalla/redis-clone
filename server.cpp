@@ -40,6 +40,48 @@ static int32_t write_all(int fd, char *buf, size_t n) {
     return 0;
 }
 
+static void fd_set_nb(int fd) {
+    errno = 0;
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (errno) {
+        msg_error("fcntl error");
+        return;
+    }
+
+    flags |= O_NONBLOCK;
+
+    errno = 0;
+
+    (void)fcntl(fd, F_SETFL, flags);
+
+    if (errno) {
+        msg_error("fcntl set flags");
+    }
+}
+
+enum {
+    STATE_REQ = 0,
+    STATE_RES = 1,
+    STATE_END = 2,  // mark connection for deletion
+};
+
+struct Conn {
+    int fd = -1;
+    uint32_t state = 0;    // either state req or res
+    size_t rbuf_size = 0;  // buffer for reading
+    uint8_t rbuf[4 + k_max_msg];
+    size_t wbuf_size = 0;  // buffer for writing
+    size_t wbuf_sent = 0;
+    uint8_t wbuf[4 + k_max_msg];
+};
+
+static void conn_put(std::vector<Conn *> &fd2conn, struct Conn *Conn) {
+    if (fd2conn.size() < = (size_t)conn->fd) {
+        fd2conn.resize(conn->fd + 1);
+    }
+    fd2conn[conn->fd] = conn;
+}
+
 static int32_t one_request(int connfd) {
     // 4 byte header
     char rbuf[4 + k_max_msg + 1];
