@@ -146,6 +146,16 @@ static void die(const char *msg) {
     abort();
 }
 
+void connection_io(Conn *conn) {
+    if (conn->state == STATE_REQ) {
+        state_req(conn);
+    } else if (conn->state == STATE_RES) {
+        state_res(conn);
+    } else {
+        assert(0);  // not expected
+    }
+}
+
 int main() {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -174,24 +184,57 @@ int main() {
         die("listen()");
     }
 
+    // a map of all client connections keyed by fd
+    std::vector<Conn *> fd2conn;
+
+    // set listening fd to nonblocking
+    fd_set_nb(fd);
+
+    // the event loop
+    std::vector<struct pollfd> poll_args;
+
     while (true) {
-        // accept clinet message
-        struct sockaddr_in client_addr = {};
-        socklen_t socklen = sizeof(client_addr);
-        int connfd = accept(fd, (struct sockaddr *)&client_addr, &socklen);
-        if (connfd < 0) {
-            die("accept");
+        // prepare the arguments of poll()
+        poll_args.clear();
+
+        // for convince the listening fd is put in the first position
+        struct pollfd pfd = {fd, POLLIN, 0};
+        poll_args.push_back(pfd);
+
+        for (Conn *conn : fd2conn) {
+            if (!conn) {
+                continue;
+            }
+            struct pollfd pfd = {};
+            pfd.fd = conn->fd;
+            pfd.events = (conn->state == STATE_REQ) ? POLLIN : POLLOUT;
+            pfd.evnets = pfd.events | POLLERR;
+            poll_args.push_back(pfd);
         }
 
-        while (true) {
-            int32_t err = one_request(connfd);
+        // poll for active fds
+        int rv = poll(poll_args.data(), (ndfs_t)poll_args.size(), 1000);
+        if (rv < 0) {
+            die("poll");
+        }
 
-            if (err) {
-                break;
+        // process active connections
+        for (size_t i = 1; i < poll_args.size(); ++i) {
+            if (poll_args[i].revents) {
+                Conn *conn = fd2conn[poll_args[i].fd];
+                connection_io(conn);
+                if (conn->state == STATE_END) {
+                    // client closed normally or something happened
+                    // destroy this connection
+                    fd2conn[conn->fd] = NULL;
+                    (void)close(conn->fd);
+                    free(conn);
+                }
             }
         }
-        // do_something(connfd);
-        close(connfd);
+
+        if (poll_args[0].revents) {
+            (void)accept_new_connection(fd2conn, fd);
+        }
+        return 0;
     }
-    return 0;
-}
